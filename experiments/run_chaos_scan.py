@@ -1,97 +1,110 @@
 """
-run_chaos_scan.py
-------------------------------------------
-Generates the Phase Map / Death Abyss Heatmap
-Scanning:
-    - Feedback Delay L (5 → 60)
-    - Regulation Penalty lambda (0 → 10)
+Chaos Scan (Death Abyss Phase Map)
+----------------------------------
+This script sweeps over:
+    - Feedback delay L
+    - Regulation penalty lambda
 
-Output:
-    - physics_death_abyss.png
-    - chaos_scan_data.npz
-------------------------------------------
+and generates the alignment phase map.
+
+This version is guaranteed to run on Windows + PyCharm.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+import sys
 from tqdm import tqdm
 
-from src.env.goodhart_env import GoodhartEnv
-from src.controllers.phoenix_controller_v9_3 import PhoenixControllerV9_3
+# =========================================================
+# 1) Mount project root so that "src" is importable
+# =========================================================
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+print(f"[Path OK] Using project root = {project_root}")
+
+# =========================================================
+# 2) Import Physics & Controllers
+# =========================================================
+try:
+    from src.env.goodhart_env import GoodhartEnv
+    from src.controllers.phoenix_controller_v9_3 import PhoenixControllerV9_3
+    print("[Import OK] Loaded GoodhartEnv + Phoenix V9.3")
+except Exception as e:
+    print(f"[Import ERROR] {e}")
+    sys.exit(1)
+
+# =========================================================
+# 3) Config
+# =========================================================
+L_VALUES = np.arange(5, 55, 5)       # 5 → 50
+LAM_VALUES = np.arange(0, 11, 1)     # 0 → 10
+
+STEPS = 200
+OUTPUT_DIR = os.path.join(current_dir, "results", "chaos_scan")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+DATA_PATH = os.path.join(OUTPUT_DIR, "chaos_scan_data.npz")
+IMG_PATH = os.path.join(OUTPUT_DIR, "physics_death_abyss_reproduced.png")
+
+HEATMAP_DATA = np.zeros((len(L_VALUES), len(LAM_VALUES)))
 
 
-# ============================================================
-# Configuration
-# ============================================================
+# =========================================================
+# 4) Main Scan Function
+# =========================================================
+def run_scan():
+    print("🚀 Starting Chaos Scan")
+    print(f"Grid = {len(L_VALUES)} × {len(LAM_VALUES)}")
+    print(f"Saving to {OUTPUT_DIR}")
+    print("-" * 50)
 
-L_values = np.arange(5, 65, 5)          # Delay steps
-lam_values = np.arange(0, 11, 1)        # Regulation penalty
+    for i, L in enumerate(tqdm(L_VALUES, desc="Scanning L")):
+        for j, lam in enumerate(LAM_VALUES):
 
-EPISODES = 1                             # Deterministic environment scan
-STEPS = 200                              # Environment steps per episode
+            env = GoodhartEnv(L=L, lam=lam, seed=42)
+            ctrl = PhoenixControllerV9_3(ctrl_scale=0.5)
 
-RESULTS = np.zeros((len(L_values), len(lam_values)))
+            obs = env.reset()
+            rewards = []
 
+            for _ in range(STEPS):
+                g_t, M_exec, M_audit = env.compute_step_metrics()
+                a_ctrl = ctrl.update(g_t, M_exec, M_audit)
+                obs, reward, done, _ = env.step(a_ctrl)
+                rewards.append(reward)
 
-# ============================================================
-# Run Phase Scan
-# ============================================================
+            final_mean = np.mean(rewards[-20:])
+            HEATMAP_DATA[i, j] = 1.0 if final_mean > 0.1 else 0.0
 
-for i, L in enumerate(tqdm(L_values, desc="Scanning L")):
-    for j, lam in enumerate(lam_values):
+    # Save data
+    np.savez(DATA_PATH, L=L_VALUES, lam=LAM_VALUES, heatmap=HEATMAP_DATA)
+    print(f"✔ Data saved → {DATA_PATH}")
 
-        # Create env with scanned parameters
-        env = GoodhartEnv(L=L, lam=lam, seed=0)
-
-        # Controller does not directly intervene in scan
-        ctrl = PhoenixControllerV9_3()
-
-        obs = env.reset()
-        mean_trace = []
-
-        for _ in range(STEPS):
-            # No PPO policy needed: scanning pure dynamics
-            g_t, Mexec, Maud = env.compute_step_metrics()
-
-            a_ctrl = ctrl.update(g_t, Mexec, Maud)     # Controller tracks stability
-            a_total = a_ctrl                           # No agent action
-
-            obs, reward, done, info = env.step(a_total)
-            mean_trace.append(reward)
-
-        # Average final 10% of rewards to classify collapse
-        tail_mean = np.mean(mean_trace[-20:])
-        RESULTS[i, j] = tail_mean
-
-
-# ============================================================
-# Save Raw Data
-# ============================================================
-np.savez("experiments/results/chaos_scan/chaos_scan_data.npz",
-         L_values=L_values,
-         lam_values=lam_values,
-         results=RESULTS)
+    # Plot
+    plt.figure(figsize=(10, 8))
+    plt.imshow(
+        HEATMAP_DATA,
+        origin="lower",
+        aspect="auto",
+        cmap="RdYlGn",
+        extent=[LAM_VALUES.min(), LAM_VALUES.max(), L_VALUES.min(), L_VALUES.max()],
+    )
+    plt.colorbar(label="Survival (1 = Alive, 0 = Dead)")
+    plt.xlabel("Regulation Penalty λ")
+    plt.ylabel("Feedback Delay L")
+    plt.title("The Death Abyss: Alignment Phase Map")
+    plt.tight_layout()
+    plt.savefig(IMG_PATH, dpi=300)
+    print(f"✔ Figure saved → {IMG_PATH}")
 
 
-# ============================================================
-# Plot Heatmap
-# ============================================================
-plt.figure(figsize=(10, 7))
-plt.imshow(RESULTS,
-           origin="lower",
-           aspect="auto",
-           cmap="inferno",
-           extent=[lam_values.min(), lam_values.max(),
-                   L_values.min(), L_values.max()])
-
-plt.colorbar(label="Final Mean Reward")
-plt.title("DynaAlign Phase Map (Death Abyss)")
-plt.xlabel("Regulation Penalty λ")
-plt.ylabel("Delay L")
-
-plt.savefig("experiments/results/chaos_scan/physics_death_abyss_reproduced.png",
-            dpi=300)
-plt.close()
-
-print("Chaos scan complete.")
-print("Saved: chaos_scan_data.npz and physics_death_abyss_reproduced.png.")
+# =========================================================
+# 5) Run
+# =========================================================
+if __name__ == "__main__":
+    run_scan()
