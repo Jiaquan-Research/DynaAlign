@@ -1,57 +1,97 @@
+"""
+run_chaos_scan.py
+------------------------------------------
+Generates the Phase Map / Death Abyss Heatmap
+Scanning:
+    - Feedback Delay L (5 → 60)
+    - Regulation Penalty lambda (0 → 10)
+
+Output:
+    - physics_death_abyss.png
+    - chaos_scan_data.npz
+------------------------------------------
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
 from src.env.goodhart_env import GoodhartEnv
-from src.controllers.phoenix_controller_v9_3 import PhoenixController
+from src.controllers.phoenix_controller_v9_3 import PhoenixControllerV9_3
 
 
-def run_episode(env, controller, max_steps=200):
-    """Runs a single episode and returns final 'alive' state (1=alive, 0=collapse)."""
-    obs = env.reset()
-    controller.reset()
+# ============================================================
+# Configuration
+# ============================================================
 
-    for _ in range(max_steps):
-        action = 0  # PPO baseline removed; we only care about environment stability
-        corrected_action = controller.step(obs, action)
-        obs, reward, done, info = env.step(corrected_action)
+L_values = np.arange(5, 65, 5)          # Delay steps
+lam_values = np.arange(0, 11, 1)        # Regulation penalty
 
-        if done:
-            return 0
-    return 1
+EPISODES = 1                             # Deterministic environment scan
+STEPS = 200                              # Environment steps per episode
+
+RESULTS = np.zeros((len(L_values), len(lam_values)))
 
 
-def chaos_scan(latency_values, seeds_per_point=5):
-    """Scans L across a range and measures collapse probability."""
-    results = []
+# ============================================================
+# Run Phase Scan
+# ============================================================
 
-    for L in latency_values:
-        env = GoodhartEnv(latency=L)
-        controller = PhoenixController()
+for i, L in enumerate(tqdm(L_values, desc="Scanning L")):
+    for j, lam in enumerate(lam_values):
 
-        alive_count = 0
-        for seed in range(seeds_per_point):
-            np.random.seed(seed)
-            alive_count += run_episode(env, controller)
+        # Create env with scanned parameters
+        env = GoodhartEnv(L=L, lam=lam, seed=0)
 
-        survival_rate = alive_count / seeds_per_point
-        results.append(survival_rate)
-        print(f"[L={L}] Survival Rate: {survival_rate:.2f}")
+        # Controller does not directly intervene in scan
+        ctrl = PhoenixControllerV9_3()
 
-    return np.array(results)
+        obs = env.reset()
+        mean_trace = []
+
+        for _ in range(STEPS):
+            # No PPO policy needed: scanning pure dynamics
+            g_t, Mexec, Maud = env.compute_step_metrics()
+
+            a_ctrl = ctrl.update(g_t, Mexec, Maud)     # Controller tracks stability
+            a_total = a_ctrl                           # No agent action
+
+            obs, reward, done, info = env.step(a_total)
+            mean_trace.append(reward)
+
+        # Average final 10% of rewards to classify collapse
+        tail_mean = np.mean(mean_trace[-20:])
+        RESULTS[i, j] = tail_mean
 
 
-if __name__ == "__main__":
-    latency_range = np.arange(1, 40, 1)
-    results = chaos_scan(latency_range, seeds_per_point=5)
+# ============================================================
+# Save Raw Data
+# ============================================================
+np.savez("experiments/results/chaos_scan/chaos_scan_data.npz",
+         L_values=L_values,
+         lam_values=lam_values,
+         results=RESULTS)
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(latency_range, results, label="Phoenix Survival", color="green")
-    plt.axvline(20, linestyle="--", color="red", label="Bifurcation (~20)")
-    plt.xlabel("Feedback Latency L")
-    plt.ylabel("Survival Probability")
-    plt.title("Chaos Scan (Death Abyss) - Phoenix Stability")
-    plt.legend()
-    plt.grid(True)
 
-    plt.tight_layout()
-    plt.savefig("chaos_scan_output.png", dpi=300)
-    plt.show()
+# ============================================================
+# Plot Heatmap
+# ============================================================
+plt.figure(figsize=(10, 7))
+plt.imshow(RESULTS,
+           origin="lower",
+           aspect="auto",
+           cmap="inferno",
+           extent=[lam_values.min(), lam_values.max(),
+                   L_values.min(), L_values.max()])
+
+plt.colorbar(label="Final Mean Reward")
+plt.title("DynaAlign Phase Map (Death Abyss)")
+plt.xlabel("Regulation Penalty λ")
+plt.ylabel("Delay L")
+
+plt.savefig("experiments/results/chaos_scan/physics_death_abyss_reproduced.png",
+            dpi=300)
+plt.close()
+
+print("Chaos scan complete.")
+print("Saved: chaos_scan_data.npz and physics_death_abyss_reproduced.png.")
