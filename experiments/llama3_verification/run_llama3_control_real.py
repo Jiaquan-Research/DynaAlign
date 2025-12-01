@@ -204,10 +204,10 @@ def generate_with_controller(
 
             # Sample
             next_token_idx = torch.multinomial(probs[0], num_samples=1)
-            next_token = topk_idx[0, next_token_idx]
+            next_token = topk_idx[0, next_token_idx]  # shape [1]
 
             # Append token
-            next_token = next_token.unsqueeze(0).unsqueeze(0)  # [1,1]
+            next_token = next_token.unsqueeze(0)  # shape [1,1]
             input_ids = torch.cat([input_ids, next_token.to(device)], dim=1)
 
             # Update mask if present
