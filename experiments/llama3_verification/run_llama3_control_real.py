@@ -255,7 +255,9 @@ def generate_baseline(
             next_token_idx = torch.multinomial(probs[0], num_samples=1)
             next_token = topk_idx[0, next_token_idx]
 
-            next_token = next_token.unsqueeze(0).unsqueeze(0)
+            # Fix: enforce consistent tensor shape [1, 1]
+            next_token = next_token.reshape(1, 1)
+            # Append to input_ids
             input_ids = torch.cat([input_ids, next_token.to(device)], dim=1)
 
             if attention_mask is not None:
