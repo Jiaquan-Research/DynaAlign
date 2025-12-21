@@ -1,6 +1,6 @@
 # Info-Flow Dynamics (IFD)
 
-**Info-Flow Dynamics (IFD)** Info-Flow Dynamics (IFD) is a minimal, independently developed, control-theoretic experimental platform for studying 
+**Info-Flow Dynamics (IFD)**  is a minimal, independently developed, control-theoretic experimental platform for studying 
 *stability and failure modes* in information-driven systems under **partial observability**.
 
 This repository does **not** model the world.  
@@ -59,13 +59,10 @@ Design Law #1 reframes *inaction* as a **legitimate stability-preserving control
 This law is treated as an engineering boundary condition, not a philosophical or ethical claim.
 
 ---
-Only two experiments are presented, intentionally chosen to isolate orthogonal failure mechanisms  
-rather than exhaustively enumerate behaviors.
 
 ## Minimal Mechanism Demonstrations
 
-All experiments below share the same core dynamics  
-and differ **only** in policy or governance structure.
+The following two experiments are intentionally chosen to isolate orthogonal failure mechanisms rather than exhaustively enumerate behaviors. Both share the same core dynamics and differ only in policy or governance structure.
 
 ---
 
